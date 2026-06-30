@@ -134,7 +134,7 @@
   // KONFIGURASI URL GOOGLE APPS SCRIPT ANDA
   // ==========================================
   const urlGasENSO = 'https://script.google.com/macros/s/AKfycbzMth4qWgEi0DuPSMEPbjQa1jcQTWE2UiaR8gRJ-8zZTBA-4joPHgA_-7gE2_butMk/exec'; // Ganti dengan URL dari jawaban sebelumnya
-  const urlGasIOD = 'https://script.google.com/macros/s/AKfycbx_wV3x1pBLP2wA_vI6gT4tSkFX6wexTpyQ0bgNDrOYQeHeDr2MwgxRCfhyav3L_qko/exec';   // Ganti dengan URL untuk IOD (dari Langkah 1)
+  const urlGasIOD = 'https://script.google.com/macros/s/AKfycbyaiXiZ57tTJvWlpD7yyL0ofWSAmrgoc7HMeJG_dA9hGmQeC6SJvDrIQ-XntM3EReHr/exec';   // Ganti dengan URL untuk IOD (dari Langkah 1)
 
   let ensoStatus = "Netral";
   let iodStatus = "Netral";
@@ -195,7 +195,7 @@
       document.getElementById('kpi-iod').innerText = "Loading...";
     try {
       // Pastikan URL_GAS_IOD_ANDA_DISINI diganti dengan Web App URL dari GAS Anda
-      const response = await fetch('https://script.google.com/macros/s/AKfycbx_wV3x1pBLP2wA_vI6gT4tSkFX6wexTpyQ0bgNDrOYQeHeDr2MwgxRCfhyav3L_qko/exec');
+      const response = await fetch('https://script.google.com/macros/s/AKfycbyaiXiZ57tTJvWlpD7yyL0ofWSAmrgoc7HMeJG_dA9hGmQeC6SJvDrIQ-XntM3EReHr/exec');
       const text = await response.text();
       const lines = text.split('\n');
       
