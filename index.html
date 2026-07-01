@@ -50,7 +50,9 @@
     .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
     @media (max-width: 600px) { .charts-row { grid-template-columns: 1fr; } }
     .chart-card { background: var(--surface-1); border: 0.5px solid var(--border); border-radius: 12px; padding: 14px; }
-    .chart-card h3 { font-size: 13px; color: var(--text-secondary); margin-bottom: 10px; font-weight: 400; }
+    .chart-card h3 { font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 400; }
+    .chart-note { font-size: 10px; color: var(--text-muted); margin-top: 8px; line-height: 1.4; display: flex; align-items: flex-start; gap: 5px; }
+    .chart-note .dash-swatch { display:inline-block; width:14px; height:0; border-top:2px dashed #7f8c8d; margin-top:5px; flex-shrink:0; }
 
     .footer { font-size: 11px; color: var(--text-muted); text-align: center; padding-top: 16px; }
   </style>
@@ -108,17 +110,19 @@
 
   <div class="charts-row">
     <div class="chart-card">
-      <h3>Deret Waktu Anomali ENSO (Mingguan)</h3>
+      <h3>Deret Waktu Anomali ENSO (Mingguan) + Proyeksi 3 Bulan</h3>
       <div style="position:relative;height:160px;"><canvas id="tsChart"></canvas></div>
+      <div class="chart-note"><span class="dash-swatch"></span><span>Garis putus-putus abu-abu = proyeksi statistik ~13 minggu ke depan (metode Holt's Damped Trend, meredam tren agar realistis). Bukan prakiraan resmi NOAA CPC.</span></div>
     </div>
     <div class="chart-card">
-      <h3>Deret Waktu IOD / DMI (Bulanan)</h3>
+      <h3>Deret Waktu IOD / DMI (Bulanan) + Proyeksi 3 Bulan</h3>
       <div style="position:relative;height:160px;"><canvas id="iodChart"></canvas></div>
+      <div class="chart-note"><span class="dash-swatch"></span><span>Garis putus-putus abu-abu = proyeksi statistik 3 bulan ke depan (metode Holt's Damped Trend, meredam tren agar realistis). Bukan prakiraan resmi BMKG.</span></div>
     </div>
   </div>
 
   <div class="footer">
-    Sumber: NOAA NCEI · NOAA PSL · Script Jembatan CORS
+    Sumber: NOAA NCEI · NOAA PSL · Script Jembatan CORS · Proyeksi: Holt's Damped Trend (statistik, indikatif, bukan model dinamis)
   </div>
 
 </div>
@@ -138,6 +142,64 @@
 
   let ensoStatus = "Netral";
   let iodStatus = "Netral";
+
+  /* ─── UTIL: PROYEKSI HOLT'S DAMPED TREND ───────────────────────
+     Metode exponential smoothing dengan redaman tren (phi < 1).
+     Lebih sesuai untuk indeks iklim (ENSO/IOD) yang bersifat
+     mean-reverting/osilatif dibanding regresi linier biasa, karena:
+       - memakai seluruh riwayat data yang tersedia (bobot menurun
+         secara eksponensial untuk data yang lebih lama)
+       - tren diredam oleh phi, sehingga proyeksi melandai menuju
+         level stabil, bukan melesat lurus tanpa batas
+  */
+  function holtDampedForecast(series, stepsAhead, opts = {}) {
+    const alpha = opts.alpha ?? 0.35; // bobot level (makin besar = makin reaktif ke data baru)
+    const beta = opts.beta ?? 0.15;   // bobot tren
+    const phi = opts.phi ?? 0.85;     // faktor redaman (0-1, makin kecil makin cepat melandai)
+
+    const n = series.length;
+    if (n === 0) return new Array(stepsAhead).fill(0);
+    if (n === 1) return new Array(stepsAhead).fill(series[0]);
+
+    // Inisialisasi level & tren dari beberapa titik awal agar lebih stabil
+    const initWindow = Math.min(4, n - 1);
+    let level = series[0];
+    let trend = (series[initWindow] - series[0]) / initWindow;
+
+    for (let t = 1; t < n; t++) {
+      const y = series[t];
+      const prevLevel = level;
+      level = alpha * y + (1 - alpha) * (prevLevel + phi * trend);
+      trend = beta * (level - prevLevel) + (1 - beta) * phi * trend;
+    }
+
+    const forecast = [];
+    let dampSum = 0;
+    for (let h = 1; h <= stepsAhead; h++) {
+      dampSum += Math.pow(phi, h);
+      forecast.push(level + dampSum * trend);
+    }
+    return forecast;
+  }
+
+  function addDaysToYYYYMMDD(dateStr, days) {
+    const y = parseInt(dateStr.substring(0, 4), 10);
+    const m = parseInt(dateStr.substring(4, 6), 10) - 1;
+    const d = parseInt(dateStr.substring(6, 8), 10);
+    const dt = new Date(Date.UTC(y, m, d));
+    dt.setUTCDate(dt.getUTCDate() + days);
+    const ny = dt.getUTCFullYear();
+    const nm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const nd = String(dt.getUTCDate()).padStart(2, '0');
+    return `${ny}${nm}${nd}`;
+  }
+
+  function addMonthsToLabel(label, months) {
+    const [y, m] = label.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, 1));
+    dt.setUTCMonth(dt.getUTCMonth() + months);
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
 
   // 1. FETCH DATA ENSO (Mingguan)
   async function fetchNOAAData() {
@@ -167,6 +229,9 @@
           nino34_series.push(latestNino);
         }
       });
+      // Simpan seluruh riwayat (untuk fitting proyeksi) sebelum dipotong untuk tampilan
+      const nino34_full = nino34_series.slice();
+
       dates = dates.slice(-20);
       nino34_series = nino34_series.slice(-20);
 
@@ -180,11 +245,28 @@
       else ensoStatus = "Netral";
       document.getElementById('kpi-nino34-sub').innerText = ensoStatus;
 
+      // ── Proyeksi 3 bulan (~13 minggu) ke depan, memakai seluruh riwayat ──
+      const STEPS_ENSO = 13; // ~3 bulan mingguan
+      const forecastVals = holtDampedForecast(nino34_full, STEPS_ENSO, { alpha: 0.35, beta: 0.15, phi: 0.85 });
+      const forecastDates = [];
+      for (let i = 1; i <= STEPS_ENSO; i++) {
+        forecastDates.push(addDaysToYYYYMMDD(dates[dates.length - 1], i * 7));
+      }
+
+      const combinedLabels = dates.concat(forecastDates);
+      const actualData = nino34_series.concat(new Array(STEPS_ENSO).fill(null));
+      const projectionData = new Array(nino34_series.length - 1).fill(null)
+        .concat([nino34_series[nino34_series.length - 1]])
+        .concat(forecastVals);
+
       // Update Chart ENSO
-      tsChart.data.labels = dates;
-      tsChart.data.datasets[0].data = nino34_series;
+      tsChart.data.labels = combinedLabels;
+      tsChart.data.datasets[0].data = actualData;
       tsChart.data.datasets[0].borderColor = latestNino > 0 ? '#c0392b' : '#2471a3';
       tsChart.data.datasets[0].backgroundColor = latestNino > 0 ? 'rgba(192,57,43,0.08)' : 'rgba(36,113,163,0.08)';
+      tsChart.data.datasets[1].data = new Array(combinedLabels.length).fill(0.5);
+      tsChart.data.datasets[2].data = new Array(combinedLabels.length).fill(-0.5);
+      tsChart.data.datasets[3].data = projectionData;
       tsChart.update();
     } catch (err) {
       console.error("Error ENSO:", err);
@@ -229,11 +311,37 @@
         }
       });
 
+      const dmiFull = dmiSeries.slice(); // seluruh riwayat untuk fitting proyeksi
+
+      dmiLabels = dmiLabels.slice(-18);
+      dmiSeries = dmiSeries.slice(-18);
+
+      // ── Proyeksi 3 bulan ke depan (Holt's Damped Trend, memakai seluruh riwayat) ──
+      const STEPS_IOD = 3;
+      const forecastVals = dmiFull.length > 0
+        ? holtDampedForecast(dmiFull, STEPS_IOD, { alpha: 0.4, beta: 0.15, phi: 0.75 })
+        : [];
+      const forecastLabels = [];
+      if (dmiLabels.length > 0) {
+        for (let i = 1; i <= STEPS_IOD; i++) {
+          forecastLabels.push(addMonthsToLabel(dmiLabels[dmiLabels.length - 1], i));
+        }
+      }
+
+      const combinedLabels = dmiLabels.concat(forecastLabels);
+      const actualData = dmiSeries.concat(new Array(STEPS_IOD).fill(null));
+      const projectionData = dmiSeries.length > 0
+        ? new Array(dmiSeries.length - 1).fill(null).concat([dmiSeries[dmiSeries.length - 1]]).concat(forecastVals)
+        : [];
+
       // Update Chart IOD
-      iodChart.data.labels = dmiLabels.slice(-18);
-      iodChart.data.datasets[0].data = dmiSeries.slice(-18);
+      iodChart.data.labels = combinedLabels;
+      iodChart.data.datasets[0].data = actualData;
       iodChart.data.datasets[0].borderColor = (latestDmi !== null && latestDmi > 0) ? '#c0392b' : '#2471a3';
       iodChart.data.datasets[0].backgroundColor = (latestDmi !== null && latestDmi > 0) ? 'rgba(192,57,43,0.08)' : 'rgba(36,113,163,0.08)';
+      iodChart.data.datasets[1].data = new Array(combinedLabels.length).fill(0.4);
+      iodChart.data.datasets[2].data = new Array(combinedLabels.length).fill(-0.4);
+      iodChart.data.datasets[3].data = projectionData;
       iodChart.update();
 
       // Update KPI IOD + klasifikasi status
@@ -358,13 +466,23 @@
 
   const tsChart = new Chart(document.getElementById('tsChart'), {
     type: 'line',
-    data: { labels: [], datasets: [ { data: [], borderWidth: 2, pointRadius: 2, fill: true }, { data: new Array(20).fill(0.5), borderColor: '#e67e22', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false }, { data: new Array(20).fill(-0.5), borderColor: '#3498db', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false } ] },
+    data: { labels: [], datasets: [
+      { data: [], borderWidth: 2, pointRadius: 2, fill: true, spanGaps: false },
+      { data: [], borderColor: '#e67e22', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false },
+      { data: [], borderColor: '#3498db', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false },
+      { label: 'Proyeksi', data: [], borderColor: '#7f8c8d', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false, spanGaps: false }
+    ] },
     options: commonOptions
   });
 
   const iodChart = new Chart(document.getElementById('iodChart'), {
     type: 'line',
-    data: { labels: [], datasets: [ { data: [], borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3 }, { data: new Array(18).fill(0.4), borderColor: '#e67e22', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false }, { data: new Array(18).fill(-0.4), borderColor: '#9b59b6', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false } ] },
+    data: { labels: [], datasets: [
+      { data: [], borderWidth: 2, pointRadius: 2, fill: true, tension: 0.3, spanGaps: false },
+      { data: [], borderColor: '#e67e22', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false },
+      { data: [], borderColor: '#9b59b6', borderWidth: 1, borderDash: [5, 4], pointRadius: 0, fill: false },
+      { label: 'Proyeksi', data: [], borderColor: '#7f8c8d', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false, tension: 0.3, spanGaps: false }
+    ] },
     options: commonOptions
   });
 
