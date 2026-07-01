@@ -182,16 +182,36 @@
     return forecast;
   }
 
-  function addDaysToYYYYMMDD(dateStr, days) {
-    const y = parseInt(dateStr.substring(0, 4), 10);
-    const m = parseInt(dateStr.substring(4, 6), 10) - 1;
-    const d = parseInt(dateStr.substring(6, 8), 10);
-    const dt = new Date(Date.UTC(y, m, d));
+  function parseFlexibleDate(str) {
+    const s = String(str).trim().toUpperCase();
+    // Format numerik: YYYYMMDD
+    if (/^\d{8}$/.test(s)) {
+      return new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
+    }
+    // Format teks: DDMMMYYYY, mis. "13NOV2024"
+    const m = s.match(/^(\d{1,2})([A-Z]{3})(\d{4})$/);
+    if (m) {
+      const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      const mi = months.indexOf(m[2]);
+      if (mi >= 0) return new Date(Date.UTC(+m[3], mi, +m[1]));
+    }
+    return null; // format tak dikenali
+  }
+
+  function formatLikeInput(dt, sampleStr) {
+    const s = String(sampleStr).trim();
+    if (/^\d{8}$/.test(s)) {
+      return `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}${String(dt.getUTCDate()).padStart(2, '0')}`;
+    }
+    const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    return `${String(dt.getUTCDate()).padStart(2, '0')}${months[dt.getUTCMonth()]}${dt.getUTCFullYear()}`;
+  }
+
+  function addDaysFlexible(dateStr, days) {
+    const dt = parseFlexibleDate(dateStr);
+    if (!dt) return dateStr; // fallback aman: jika format tak dikenali, kembalikan apa adanya
     dt.setUTCDate(dt.getUTCDate() + days);
-    const ny = dt.getUTCFullYear();
-    const nm = String(dt.getUTCMonth() + 1).padStart(2, '0');
-    const nd = String(dt.getUTCDate()).padStart(2, '0');
-    return `${ny}${nm}${nd}`;
+    return formatLikeInput(dt, dateStr);
   }
 
   function addMonthsToLabel(label, months) {
@@ -250,7 +270,7 @@
       const forecastVals = holtDampedForecast(nino34_full, STEPS_ENSO, { alpha: 0.35, beta: 0.15, phi: 0.85 });
       const forecastDates = [];
       for (let i = 1; i <= STEPS_ENSO; i++) {
-        forecastDates.push(addDaysToYYYYMMDD(dates[dates.length - 1], i * 7));
+        forecastDates.push(addDaysFlexible(dates[dates.length - 1], i * 7));
       }
 
       const combinedLabels = dates.concat(forecastDates);
